@@ -1,140 +1,152 @@
 """
-Apache Flink Real-time Stream Processor
-Performs windowed aggregations and sends results to Kafka
+Simplified Real-time Aggregator (Alternative to Flink)
+This provides similar windowed aggregation functionality without PyFlink complexity.
+Use this if PyFlink is causing issues.
 """
 
-from pyflink.datastream import StreamExecutionEnvironment
-from pyflink.datastream.connectors.kafka import (
-    KafkaSource,
-    KafkaOffsetsInitializer,
-    KafkaSink,
-    KafkaRecordSerializationSchema,
-)
-from pyflink.common.serialization import SimpleStringSchema
-from pyflink.common.typeinfo import Types
-from pyflink.datastream.functions import MapFunction, ReduceFunction
-from pyflink.datastream.window import TumblingProcessingTimeWindows
-from pyflink.common.time import Time
 import json
+import time
+from datetime import datetime
+from collections import defaultdict
+from kafka import KafkaConsumer, KafkaProducer
 
 
-class TradeParser(MapFunction):
-    """Parse JSON trade messages"""
+class WindowedAggregator:
+    """Performs 1-minute tumbling window aggregations"""
 
-    def map(self, value):
-        trade = json.loads(value)
-        return (
-            trade["symbol"],
-            trade["sector"],
-            float(trade["price"]),
-            int(trade["volume"]),
-            float(trade["trade_value"]),
-            trade["trade_type"],
+    def __init__(self, window_seconds=60):
+        self.window_seconds = window_seconds
+        self.current_window = defaultdict(
+            lambda: {"prices": [], "volumes": [], "values": [], "count": 0}
         )
+        self.last_flush = time.time()
+
+    def add_trade(self, trade):
+        """Add trade to current window"""
+        symbol = trade["symbol"]
+        window = self.current_window[symbol]
+
+        window["prices"].append(trade["price"])
+        window["volumes"].append(trade["volume"])
+        window["values"].append(trade["trade_value"])
+        window["count"] += 1
+
+    def should_flush(self):
+        """Check if window should be flushed"""
+        return (time.time() - self.last_flush) >= self.window_seconds
+
+    def flush_window(self):
+        """Calculate aggregations and return results"""
+        results = []
+
+        for symbol, data in self.current_window.items():
+            if data["count"] > 0:
+                # Calculate VWAP (Volume Weighted Average Price)
+                total_value = sum(data["values"])
+                total_volume = sum(data["volumes"])
+                vwap = total_value / total_volume if total_volume > 0 else 0
+
+                result = {
+                    "window_type": "1min_aggregation",
+                    "symbol": symbol,
+                    "vwap": round(vwap, 2),
+                    "total_volume": total_volume,
+                    "total_value": round(total_value, 2),
+                    "trade_count": data["count"],
+                    "min_price": round(min(data["prices"]), 2),
+                    "max_price": round(max(data["prices"]), 2),
+                    "avg_price": round(sum(data["prices"]) / len(data["prices"]), 2),
+                    "timestamp": datetime.now().isoformat(),
+                }
+                results.append(result)
+
+        # Clear window
+        self.current_window.clear()
+        self.last_flush = time.time()
+
+        return results
 
 
-class TradeAggregator(ReduceFunction):
-    """Aggregate trades within time window"""
+def run_aggregator():
+    """Main aggregation loop"""
+    print("[Aggregator] Starting real-time aggregation service...")
+    print("[Aggregator] Window size: 1 minute")
+    print("[Aggregator] Computing VWAP, volumes, and price statistics")
 
-    def reduce(self, trade1, trade2):
-        symbol = trade1[0]
-        sector = trade1[1]
-        total_volume = trade1[3] + trade2[3]
-        total_value = trade1[4] + trade2[4]
-
-        # Calculate VWAP (Volume Weighted Average Price)
-        vwap = total_value / total_volume if total_volume > 0 else 0
-
-        return (symbol, sector, vwap, total_volume, total_value, trade1[5])
-
-
-def create_flink_job():
-    """Create Flink streaming job for real-time aggregations"""
-
-    # Set up the execution environment
-    env = StreamExecutionEnvironment.get_execution_environment()
-    env.set_parallelism(2)
-
-    # Configure Kafka source
-    kafka_source = (
-        KafkaSource.builder()
-        .set_bootstrap_servers("localhost:9092")
-        .set_topics("stock_trades")
-        .set_group_id("flink-aggregator")
-        .set_starting_offsets(KafkaOffsetsInitializer.latest())
-        .set_value_only_deserializer(SimpleStringSchema())
-        .build()
-    )
-
-    # Read from Kafka
-    trade_stream = env.from_source(
-        kafka_source, watermark_strategy=None, source_name="Stock Trades Source"
-    )
-
-    # Parse trades
-    parsed_stream = trade_stream.map(
-        TradeParser(),
-        output_type=Types.TUPLE(
-            [
-                Types.STRING(),  # symbol
-                Types.STRING(),  # sector
-                Types.FLOAT(),  # price
-                Types.INT(),  # volume
-                Types.FLOAT(),  # trade_value
-                Types.STRING(),  # trade_type
-            ]
-        ),
-    )
-
-    # 1-minute tumbling window aggregations by symbol
-    windowed_aggregations = (
-        parsed_stream.key_by(lambda x: x[0])
-        .window(TumblingProcessingTimeWindows.of(Time.minutes(1)))
-        .reduce(TradeAggregator())
-    )
-
-    # Format aggregated results
-    def format_aggregation(trade_tuple):
-        symbol, sector, vwap, volume, value, _ = trade_tuple
-        result = {
-            "window_type": "1min_aggregation",
-            "symbol": symbol,
-            "sector": sector,
-            "vwap": round(vwap, 2),
-            "total_volume": volume,
-            "total_value": round(value, 2),
-            "timestamp": str(Time.now()),
-        }
-        return json.dumps(result)
-
-    formatted_stream = windowed_aggregations.map(
-        format_aggregation, output_type=Types.STRING()
-    )
-
-    # Configure Kafka sink for aggregated results
-    kafka_sink = (
-        KafkaSink.builder()
-        .set_bootstrap_servers("localhost:9092")
-        .set_record_serializer(
-            KafkaRecordSerializationSchema.builder()
-            .set_topic("trade_aggregations")
-            .set_value_serialization_schema(SimpleStringSchema())
-            .build()
+    try:
+        # Setup Kafka consumer
+        print("[Aggregator] Connecting to Kafka consumer...")
+        consumer = KafkaConsumer(
+            "stock_trades",
+            bootstrap_servers="localhost:9092",
+            auto_offset_reset="latest",  # Only process new messages
+            enable_auto_commit=True,
+            value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+            group_id="aggregator-group",
+            consumer_timeout_ms=1000,  # Check for flush every second
         )
-        .build()
-    )
+        print("[Aggregator] ✓ Consumer connected!")
 
-    # Send aggregated results to Kafka
-    formatted_stream.sink_to(kafka_sink)
+        # Setup Kafka producer for aggregated results
+        print("[Aggregator] Connecting to Kafka producer...")
+        producer = KafkaProducer(
+            bootstrap_servers="localhost:9092",
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        )
+        print("[Aggregator] ✓ Producer connected!")
 
-    # Print to console for monitoring
-    formatted_stream.print()
+        aggregator = WindowedAggregator(window_seconds=60)
 
-    # Execute the Flink job
-    env.execute("Stock Trade Aggregator")
+        print("[Aggregator] 🎧 Listening for trades and computing aggregations...")
+        print("[Aggregator] Aggregations will be published every 60 seconds\n")
+
+        window_count = 0
+
+        while True:
+            # Consume messages
+            messages = consumer.poll(timeout_ms=1000)
+
+            for topic_partition, records in messages.items():
+                for record in records:
+                    trade = record.value
+                    aggregator.add_trade(trade)
+
+            # Check if window should be flushed
+            if aggregator.should_flush():
+                results = aggregator.flush_window()
+
+                if results:
+                    window_count += 1
+                    print(f"\n[Aggregator] 📊 Window #{window_count} Complete!")
+                    print(
+                        f"[Aggregator] Computed aggregations for {len(results)} symbols"
+                    )
+
+                    # Publish each aggregation
+                    for result in results:
+                        producer.send("trade_aggregations", value=result)
+                        print(
+                            f"[Aggregator]   {result['symbol']}: "
+                            f"VWAP=${result['vwap']:.2f}, "
+                            f"Vol={result['total_volume']:,}, "
+                            f"Trades={result['trade_count']}, "
+                            f"Range=${result['min_price']:.2f}-${result['max_price']:.2f}"
+                        )
+
+                    producer.flush()
+                    print(
+                        f"[Aggregator] ✓ Published {len(results)} aggregations to Kafka\n"
+                    )
+
+    except KeyboardInterrupt:
+        print("\n[Aggregator] Shutting down gracefully...")
+    except Exception as e:
+        print(f"[Aggregator ERROR] {e}")
+        import traceback
+
+        traceback.print_exc()
+        raise
 
 
 if __name__ == "__main__":
-    print("[Flink] Starting real-time aggregation job...")
-    print("[Flink] Will compute 1-minute windowed VWAP and volumes per symbol")
-    create_flink_job()
+    run_aggregator()
