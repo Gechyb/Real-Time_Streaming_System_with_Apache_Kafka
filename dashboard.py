@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -102,7 +102,7 @@ try:
     symbols_query = "SELECT DISTINCT symbol FROM trades ORDER BY symbol"
     symbols_df = pd.read_sql_query(text(symbols_query), con=engine.connect())
     available_symbols = ["All"] + symbols_df["symbol"].tolist()
-except:
+except Exception:
     available_symbols = ["All"]
 
 selected_symbol = st.sidebar.selectbox("Filter by Symbol", available_symbols)
@@ -129,7 +129,7 @@ while True:
 
         # Filter anomalies if requested
         if show_anomalies:
-            df_trades = df_trades[df_trades["is_anomaly"] == True]
+            df_trades = df_trades[df_trades["is_anomaly"]]
             if df_trades.empty:
                 st.info("No anomalies detected in current data window")
                 time.sleep(update_interval)
@@ -311,7 +311,7 @@ while True:
             st.subheader("🔥 Anomaly Detection")
 
             if anomaly_count > 0:
-                anomaly_df = df_trades[df_trades["is_anomaly"] == True].sort_values(
+                anomaly_df = df_trades[df_trades["is_anomaly"]].sort_values(
                     "anomaly_score", ascending=False
                 )
                 st.dataframe(

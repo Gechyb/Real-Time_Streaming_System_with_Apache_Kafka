@@ -8,7 +8,6 @@ import numpy as np
 
 
 class StockMarketSimulator:
-    """Simulates realistic stock price movements using geometric Brownian motion"""
 
     def __init__(self):
         self.stocks = {

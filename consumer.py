@@ -1,8 +1,6 @@
 import json
 import psycopg2
 from kafka import KafkaConsumer
-import pickle
-import os
 from collections import deque
 import numpy as np
 
@@ -129,9 +127,9 @@ def run_consumer():
                 # Insert trade
                 insert_query = """
                     INSERT INTO trades (
-                        trade_id, timestamp, symbol, sector, price, volume, 
-                        trade_value, trade_type, exchange, fee, 
-                        is_anomaly, anomaly_score
+                        trade_id, timestamp, symbol, sector, price, volume,
+                        trade_value, trade_type, exchange, fee,
+                                                                      is_anomaly, anomaly_score
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (trade_id) DO NOTHING;
