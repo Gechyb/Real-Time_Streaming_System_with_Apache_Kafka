@@ -1,7 +1,6 @@
 """
 Simplified Real-time Aggregator (Alternative to Flink)
 This provides similar windowed aggregation functionality without PyFlink complexity.
-Use this if PyFlink is causing issues.
 """
 
 import json

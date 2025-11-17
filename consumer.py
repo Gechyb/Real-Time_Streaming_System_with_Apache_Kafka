@@ -129,7 +129,7 @@ def run_consumer():
                     INSERT INTO trades (
                         trade_id, timestamp, symbol, sector, price, volume,
                         trade_value, trade_type, exchange, fee,
-                                                                      is_anomaly, anomaly_score
+                        is_anomaly, anomaly_score
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (trade_id) DO NOTHING;
@@ -165,12 +165,22 @@ def run_consumer():
                 print(f"[Consumer ERROR] Failed to process message: {e}")
                 continue
 
+    except KeyboardInterrupt:
+        print("\n[Consumer] Shutting down gracefully...")
     except Exception as e:
         print(f"[Consumer ERROR] {e}")
         import traceback
 
         traceback.print_exc()
         raise
+    finally:
+        if "cur" in locals():
+            cur.close()
+        if "conn" in locals():
+            conn.close()
+        if "consumer" in locals():
+            consumer.close()
+        print("[Consumer] Connections closed.")
 
 
 if __name__ == "__main__":
