@@ -158,7 +158,8 @@ streamlit run dashboard.py
 ## Dashboard
 🎉 **Dashboard will be available at**: `http://localhost:8501`
 
-<video controls src="real-time updates.mov" title="Title"></video>
+<video controls src="real-time updates-1.mov" title="Title"></video>
+
 ## 📂 Project Structure
 ```
 Real-Time_Streaming_System_with_Apache_Kafka/
