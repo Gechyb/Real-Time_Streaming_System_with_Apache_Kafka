@@ -158,7 +158,8 @@ streamlit run dashboard.py
 ## Dashboard
 🎉 **Dashboard will be available at**: `http://localhost:8501`
 
-<video controls src="real-time updates-1.mov" title="Title"></video>
+![Dashboard Demo](asserts/ezgif-3484b0309b95aec2.gif)
+
 
 ## 📂 Project Structure
 ```
